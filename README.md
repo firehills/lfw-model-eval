@@ -436,6 +436,111 @@ enrolled identities, so these reports **do not measure open-set unknown-person
 rejection**. Face detection failures stop preparation and are not counted as
 recognition false rejections; report any preparation exclusions separately.
 
+### Interpreting the verification metrics
+
+Every number in the `metrics` block of `report.json` comes from the same list of
+comparisons in `scores.csv`. A comparison is one test image (probe) scored
+against one identity template. In a deployed system this is one claim, such as
+"this face is Alice". The explicit threshold turns each score into an
+accept/reject decision. The counts and rates below describe those decisions.
+Only ROC AUC and EER consider all possible thresholds.
+
+**Key values for judging a face recognition model**
+
+| Priority | Value | Why it matters |
+|---|---|---|
+| Key | `false_accept_rate` (FAR / FMR) | Security: the share of impostor attempts that get in |
+| Key | `false_reject_rate` (FRR / FNMR) or `true_accept_rate` (TAR = 1 − FRR) | Usability: the share of genuine users who are turned away |
+| Key | TAR at a fixed low FAR, read from `roc` | Standard way to compare models at the same security level |
+| Key | `roc_auc`, `eer_interpolated` | Separation of genuine and impostor scores, independent of the threshold |
+| Context | Raw confusion counts and comparison totals | Shows how much evidence supports each rate |
+| Use with care | `accuracy`, `precision`, `f1` | Depend on how many genuine and impostor comparisons there are; often misleading here |
+| Supporting | `balanced_accuracy`, `true_reject_rate` | Summaries of the same FAR/FRR trade-off |
+
+**Counts.** `genuine_comparisons` is the number of probes compared with their own
+identity's template (K·Y). `impostor_comparisons` is the number compared with
+every other identity's template (K·Y·(K−1)). The two totals split into four outcomes:
+
+- `true_accepted`: a genuine user was accepted. This is correct.
+- `false_rejected`: a genuine user was turned away. In a real system this means
+  a retry, a fallback to a PIN or password, or a call to support.
+- `false_accepted`: an impostor was accepted. In a real system this is a
+  security breach, such as unlocking someone else's device, account or door.
+- `true_rejected`: an impostor was turned away. This is correct.
+
+Impostor comparisons grow with the square of the number of identities, so they
+far outnumber genuine comparisons. A small number of false accepts can therefore
+be a very small FAR. A large number of true rejects says little about model
+quality.
+
+**Error rates (the operational trade-off).**
+
+- **FAR** = `FA / impostor_comparisons`. This is the chance that one impostor
+  attempt against one claimed identity is accepted. Security requirements are
+  usually stated as a target FAR, such as 1 in 10,000 or 1 in 1,000,000.
+  Measuring a very low FAR reliably needs many impostor comparisons. If there
+  are zero false accepts, you only know that FAR is below about
+  `1 / impostor_comparisons`.
+- **FRR** = `FR / genuine_comparisons`. This is the chance that a genuine user
+  is rejected on one attempt. It drives user frustration and support load.
+  Retries reduce the effective FRR, but they also give impostors more chances.
+- **TAR** (recall, sensitivity) = 1 − FRR. **TRR** (specificity) = 1 − FAR.
+
+FAR and FRR move in opposite directions as the threshold changes. A stricter
+threshold (higher for similarities, lower for distances) lowers FAR and raises
+FRR. A real system chooses its threshold for the use case. Payments or access
+control need a very low FAR. Low-risk convenience features can accept a higher
+FAR in exchange for a lower FRR. Choose the threshold on separate validation
+data, not on these results.
+
+FAR is measured per comparison. If a system searches one probe against N
+enrolled identities (1:N identification or watch-list), the chance of at least
+one false match is about `1 − (1 − FAR)^N`, which is roughly `N × FAR`. A FAR
+that is fine for 1:1 verification can therefore produce frequent false matches
+in a large gallery.
+
+**Threshold-independent quality.**
+
+- **ROC curve** (`roc` in `report.json`): TAR plotted against FAR at every
+  possible threshold. The usual way to compare models is TAR at a fixed FAR,
+  such as TAR@FAR=1e-3 or 1e-4, read from these arrays. That is more relevant
+  than a single threshold that happens to suit one model. A FAR level is only
+  meaningful if `impostor_comparisons` is well above 1/FAR.
+- **ROC AUC**: the chance that a random genuine comparison scores better than a
+  random impostor comparison. 1.0 means perfect separation and 0.5 means chance.
+  AUC averages over all FARs, including high FARs that no real deployment would
+  use. Two models with similar AUC can therefore differ a lot at low FAR.
+- **EER** (`eer_interpolated`): the error rate at the threshold where FAR equals
+  FRR. Lower is better. EER is a compact one-number comparison, but a deployed
+  system rarely runs at the EER point. The EER threshold is also tuned on these
+  test scores, so it is not a validated operating threshold.
+
+**Summary metrics and their limits.**
+
+- **Accuracy** = (TA + TR) / all comparisons. Impostor comparisons dominate, so
+  a model that rejects everything still scores close to 1. Do not use accuracy
+  alone to rank models.
+- **Balanced accuracy** = (TAR + TRR) / 2. This weights genuine and impostor
+  outcomes equally, which is more informative than plain accuracy. It still
+  hides which kind of error is happening.
+- **Precision** = TA / (TA + FA). This is the share of accepted claims that were
+  genuine. It depends on the ratio of genuine to impostor attempts, which here
+  is set by the protocol (1 : K−1), not by real traffic. Real-world precision
+  depends on how often impostors actually try.
+- **F1**: the harmonic mean of precision and recall. It has the same dependence
+  on that ratio, so treat it as secondary for biometric verification.
+
+**Relation to a real system.** These figures measure only the recognition
+model's embeddings, together with the configured preprocessing. Real performance
+also depends on several other factors: detection and alignment failures (which
+stop preparation here and are not counted as false rejects), image quality and
+capture conditions, liveness and presentation-attack detection, the number of
+retries allowed, gallery size, and demographic composition. Open-set rejection
+of people who were never enrolled is not measured. LFW is small, made up of
+celebrities, and may overlap with model training data. Treat its results as a
+relative comparison under a fixed protocol, not as a guarantee of production
+error rates.
+
 ### Timing and fair comparisons
 
 The timed operation is a synchronous `runtime.embed(tensor)` call including
