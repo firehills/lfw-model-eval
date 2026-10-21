@@ -1,0 +1,2 @@
+# Installed by .devcontainer/gpu/Dockerfile after removing the CPU onnxruntime wheel.
+onnxruntime-gpu==1.20.2

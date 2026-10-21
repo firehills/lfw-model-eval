@@ -218,3 +218,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Face evaluation datasets, biometric tensors, model weights and reports
+data/
+models/
+artifacts/
+reports/

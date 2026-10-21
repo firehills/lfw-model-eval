@@ -1,0 +1,12 @@
+{
+  "name": "mobilefacenet-example-112-nhwc",
+  "size": 112,
+  "layout": "NHWC",
+  "color": "RGB",
+  "mean": [127.5, 127.5, 127.5],
+  "std": [128.0, 128.0, 128.0],
+  "alignment": "arcface",
+  "dtype": "float32",
+  "detection_threshold": 0.9,
+  "face_selection": "largest"
+}

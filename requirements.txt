@@ -1,0 +1,7 @@
+numpy==1.26.4
+Pillow==11.1.0
+opencv-python==4.10.0.84
+onnxruntime==1.20.1
+tensorflow==2.16.2
+tf-keras==2.16.0
+retina-face==0.0.17
