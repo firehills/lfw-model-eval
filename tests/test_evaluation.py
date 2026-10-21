@@ -42,6 +42,8 @@ def test_real_onnx_evaluation_and_reports(image_dataset, config, tmp_path, dimen
     output = tmp_path / "report"
     report = evaluate(manifest, model, output, "cosine", 0.95, warmup=1)
     assert report["model"]["embedding_dimension"] == dimension
+    assert report["settings"]["threshold"] == report["verification"]["threshold"] == 0.95
+    assert report["verification"]["acceptance"] == "score >= threshold"
     assert report["verification"]["true_accepted"] == 4
     assert report["verification"]["true_rejected"] == 4
     assert report["identification"]["rank1_accuracy"] == 1
@@ -68,7 +70,11 @@ def test_evaluate_cli(image_dataset, config, tmp_path):
         "--metric", "euclidean", "--warmup", "0",
     ], check=True, capture_output=True, text=True)
     assert "Full report:" in result.stdout
-    assert (tmp_path / "report/report.json").is_file()
+    assert '"threshold": 0.95' in result.stdout
+    persisted = json.loads((tmp_path / "report/report.json").read_text())
+    assert persisted["settings"]["threshold"] == persisted["verification"]["threshold"] == 0.95
+    assert persisted["verification"]["metric"] == "euclidean"
+    assert persisted["verification"]["acceptance"] == "score <= threshold"
 
 
 def test_manifest_rejects_corruption_leakage_and_traversal(image_dataset, config, tmp_path):

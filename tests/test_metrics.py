@@ -20,6 +20,8 @@ def test_distance_definitions(metric, expected):
 ])
 def test_perfect_separation_and_threshold_direction(metric, values, threshold):
     result = verification_metrics(np.array([True, False, True, False]), np.array(values), threshold, metric)
+    assert result["metric"] == metric and result["threshold"] == threshold
+    assert result["acceptance"] == ("score >= threshold" if metric in {"cosine", "dot"} else "score <= threshold")
     assert result["true_accepted"] == 2 and result["true_rejected"] == 2
     assert result["false_accepted"] == 0 and result["false_rejected"] == 0
     assert result["roc_auc"] == 1 and result["eer_interpolated"] == 0

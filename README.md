@@ -401,7 +401,10 @@ misleading; also compare balanced accuracy, FAR and FRR.
 Each new report directory contains:
 
 - `report.json`: configuration, model/manifest hashes, runtime/environment,
-  counts, threshold, metrics, ROC arrays and timing.
+  counts, threshold, metrics, ROC arrays and timing. The applied `--threshold`,
+  metric and acceptance rule are recorded in both `settings` and `verification`,
+  so the threshold-dependent counts and rates are never separated from the
+  threshold that produced them.
 - `scores.csv`: one row per probe/claimed-identity comparison, with raw score,
   genuine label, accept decision and rank-1 identity.
 - `embeddings.npz`: embeddings in manifest-image order, templates with ordered
@@ -438,10 +441,11 @@ recognition false rejections; report any preparation exclusions separately.
 
 ### Interpreting the verification metrics
 
-Every number in the `metrics` block of `report.json` comes from the same list of
+Every number in the `verification` block of `report.json` comes from the same list of
 comparisons in `scores.csv`. A comparison is one test image (probe) scored
 against one identity template. In a deployed system this is one claim, such as
-"this face is Alice". The explicit threshold turns each score into an
+"this face is Alice". The explicit threshold (`verification.threshold`, applied
+using `verification.acceptance`) turns each score into an
 accept/reject decision. The counts and rates below describe those decisions.
 Only ROC AUC and EER consider all possible thresholds.
 

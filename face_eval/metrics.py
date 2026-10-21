@@ -64,6 +64,8 @@ def verification_metrics(labels: np.ndarray, scores: np.ndarray, threshold: floa
     weight = -difference[previous] / (difference[crossing] - difference[previous])
     eer = fpr[previous] + weight * (fpr[crossing] - fpr[previous])
     return {
+        "metric": metric, "threshold": float(threshold),
+        "acceptance": "score >= threshold" if higher else "score <= threshold",
         "true_accepted": ta, "false_accepted": fa,
         "false_rejected": fr, "true_rejected": tr,
         "genuine_comparisons": positive, "impostor_comparisons": negative,
