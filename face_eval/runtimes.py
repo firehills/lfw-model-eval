@@ -1,7 +1,8 @@
 """Strict CPU/GPU inference adapters for ONNX and TensorFlow Lite.
 
-GPU runs never fall back to CPU silently: if the requested accelerator cannot
-be used, loading fails with an explicit error.
+GPU runs never fall back to CPU silently: if the requested accelerator cannot be used,
+loading fails with an explicit error. This keeps the evaluation pipeline honest and makes
+it clear when a user actually requested a GPU configuration.
 """
 
 import os
@@ -15,12 +16,15 @@ from face_eval.config import ModelConfig
 
 
 class Runtime(Protocol):
+    """Protocol describing the inference boundary used by the evaluation pipeline."""
+
     metadata: dict
 
     def embed(self, tensor: np.ndarray) -> np.ndarray: ...
 
 
 def embedding_vector(output: np.ndarray) -> np.ndarray:
+    """Validate and flatten model outputs into a single nonzero embedding vector."""
     output = np.asarray(output)
     if np.count_nonzero(np.asarray(output.shape) > 1) != 1 or output.size < 2:
         raise ValueError(f"Expected a single embedding vector, got shape {output.shape}")
@@ -31,6 +35,7 @@ def embedding_vector(output: np.ndarray) -> np.ndarray:
 
 
 def check_input(shape, dtype, config: ModelConfig) -> None:
+    """Verify that a runtime input matches the model preprocessing contract."""
     if len(shape) != 4 or any(
         isinstance(actual, (int, np.integer)) and actual > 0 and actual != expected
         for actual, expected in zip(shape, config.shape)
@@ -41,6 +46,8 @@ def check_input(shape, dtype, config: ModelConfig) -> None:
 
 
 class OnnxRuntime:
+    """ONNX Runtime adapter for float/uint8/int8 embedding models."""
+
     def __init__(
         self, path: Path, config: ModelConfig, threads: int, output_name: str | None,
         device: str = "cpu", gpu_id: int = 0,
@@ -92,11 +99,14 @@ class OnnxRuntime:
         }
 
     def embed(self, tensor: np.ndarray) -> np.ndarray:
+        """Run one model inference and convert the output into a feature vector."""
         output = self.session.run([self.output_name], {self.input.name: tensor})[0]
         return embedding_vector(output)
 
 
 class TFLiteRuntime:
+    """TensorFlow Lite adapter with optional GPU delegate support."""
+
     def __init__(
         self, path: Path, config: ModelConfig, threads: int, output_name: str | None,
         device: str = "cpu", gpu_delegate: Path | None = None,
@@ -157,6 +167,7 @@ class TFLiteRuntime:
         }
 
     def embed(self, tensor: np.ndarray) -> np.ndarray:
+        """Set the input tensor, invoke the interpreter, and dequantize the output."""
         self.interpreter.set_tensor(self.input["index"], tensor)
         self.interpreter.invoke()
         output = self.interpreter.get_tensor(self.output["index"])
@@ -169,6 +180,7 @@ def load_runtime(
     device: str = "cpu", output_name: str | None = None,
     gpu_id: int = 0, gpu_delegate: Path | None = None,
 ) -> Runtime:
+    """Select the correct backend and instantiate the runtime for a given model file."""
     if device not in {"cpu", "gpu"}:
         raise ValueError("device must be cpu or gpu")
     if gpu_id < 0:

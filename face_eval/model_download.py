@@ -1,4 +1,9 @@
-"""Safe HTTPS download helper for recognition model files."""
+"""Safe HTTPS download helper for recognition model files.
+
+The model download path is intentionally conservative: it rejects overwrite attempts,
+requires HTTPS, validates size limits, and records a checksum so the file cannot be used
+without verifying its payload integrity.
+"""
 
 from pathlib import Path
 import tempfile
@@ -12,7 +17,21 @@ from face_eval.io import sha256, write_json
 def download_model(
     destination: Path, url: str, checksum: str | None = None, max_bytes: int = 2 * 1024**3,
 ) -> Path:
-    """Download a model file without overwriting existing outputs."""
+    """Download a model securely and persist metadata about the provenance.
+
+    Parameters
+    ----------
+    destination:
+        Final path for the ONNX model. The function refuses to overwrite an existing file.
+    url:
+        HTTPS URL used to fetch the model archive or payload.
+    checksum:
+        Optional SHA-256 hash that must match the downloaded content before the file is
+        accepted.
+    max_bytes:
+        Maximum number of bytes allowed in the downloaded payload. This prevents oversized
+        or malicious content from consuming the workspace.
+    """
     if destination.exists():
         raise FileExistsError(f"Destination already exists: {destination}")
     if destination.suffix.lower() != ".onnx":

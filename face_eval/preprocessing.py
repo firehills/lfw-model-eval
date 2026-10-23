@@ -1,4 +1,10 @@
-"""Common image -> aligned, normalized, model-ready tensor entry point."""
+"""Common image -> aligned, normalized, model-ready tensor entry point.
+
+The preprocessing pipeline is the handoff between raw dataset images and the serialized
+binary tensors consumed by the runtime. It takes a detected face, aligns it to a fixed
+landmark template, normalizes it to the model contract, and emits exactly the tensor
+shape/dtype expected by the runtime.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,16 +21,22 @@ from face_eval.io import sha256, write_json
 
 @dataclass(frozen=True)
 class Face:
+    """Face detection output with location, aligned landmark points, and confidence."""
+
     bbox: tuple[float, float, float, float]
     landmarks: np.ndarray
     confidence: float
 
 
 class Detector(Protocol):
+    """Minimal protocol for any detector that can return face boxes and landmarks."""
+
     def detect(self, bgr_image: np.ndarray) -> list[Face]: ...
 
 
 class RetinaFaceDetector:
+    """Thin adapter around RetinaFace detection used for live preprocessing runs."""
+
     def __init__(self, threshold: float = 0.9):
         import tensorflow as tf
         tf.config.set_visible_devices([], "GPU")
@@ -42,7 +54,8 @@ class RetinaFaceDetector:
         faces = []
         for detected in result.values():
             points = detected["landmarks"]
-            # Canonical templates use image-left to image-right, not anatomical labels.
+            # Canonical templates use image-left to image-right ordering, not anatomical
+            # labels, so the points must be reordered before alignment.
             eyes = sorted([points["left_eye"], points["right_eye"]], key=lambda p: p[0])
             mouth = sorted([points["mouth_left"], points["mouth_right"]], key=lambda p: p[0])
             faces.append(Face(
@@ -54,7 +67,7 @@ class RetinaFaceDetector:
 
 
 def similarity_transform(source: np.ndarray, target: np.ndarray) -> np.ndarray:
-    """Least-squares similarity transform without reflection (five correspondences)."""
+    """Estimate a least-squares similarity transform for five landmark correspondences."""
     source, target = np.asarray(source, dtype=np.float64), np.asarray(target, dtype=np.float64)
     if source.shape != (5, 2) or target.shape != (5, 2):
         raise ValueError("Alignment requires five [x, y] keypoints")
@@ -74,14 +87,17 @@ def similarity_transform(source: np.ndarray, target: np.ndarray) -> np.ndarray:
 
 
 class Preprocessor:
-    """Reuse `Preprocessor(config, detector).process(path)` in other applications."""
+    """Reusable face preprocessing utility for model-ready tensor generation."""
 
     def __init__(self, config: ModelConfig, detector: Detector):
         self.config, self.detector = config, detector
 
     def process(self, image_path: str | Path) -> tuple[np.ndarray, Face]:
+        """Read one image, detect the face, align it, normalize it, and emit a tensor."""
         with Image.open(image_path) as image:
             rgb = np.asarray(ImageOps.exif_transpose(image).convert("RGB"))
+        # The detector operates on BGR because RetinaFace exports its result in that color
+        # space; the conversion keeps the bound between raw image data and model input exact.
         bgr = np.ascontiguousarray(rgb[:, :, ::-1])
         faces = [
             f for f in self.detector.detect(bgr)
@@ -96,6 +112,8 @@ class Preprocessor:
                 raise ValueError(f"Invalid face bounding box: {image_path}")
             if face.bbox[2] <= face.bbox[0] or face.bbox[3] <= face.bbox[1]:
                 raise ValueError(f"Empty face bounding box: {image_path}")
+        # The largest box is selected so a single source photo with multiple faces does not
+        # silently generate the wrong identity template.
         face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
         transform = similarity_transform(face.landmarks, self.config.target_landmarks())
         aligned = cv2.warpAffine(
@@ -125,6 +143,27 @@ def prepare_dataset(
     enrolment: int, testing: int, identities: list[str] | None = None,
     max_identities: int | None = None, progress: bool = False,
 ) -> Path:
+    """Prepare a manifest and binary tensors for a dataset split.
+
+    Parameters
+    ----------
+    root:
+        Root directory containing identity folders with raw image files.
+    output:
+        Destination for the prepared dataset export, including the manifest and binary bins.
+    config:
+        Preprocessing contract determining shape, dtype, normalization, and alignment.
+    detector:
+        Face detector producing face crops and landmarks.
+    enrolment/testing:
+        Number of source images assigned to each identity's enrolment and test lists.
+    identities:
+        Optional subset of identity names to include; the function filters to those names.
+    max_identities:
+        Hard cap on the number of identities retained in alphabetical order.
+    progress:
+        Print one line per processed image when enabled.
+    """
     selected, excluded = select_images(root, enrolment, testing, identities, max_identities)
     output.mkdir(parents=True, exist_ok=False)
     processor = Preprocessor(config, detector)
@@ -137,6 +176,8 @@ def prepare_dataset(
         relative = Path(selected_image.split) / selected_image.identity / f"{selected_image.path.name}.bin"
         destination = output / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
+        # Writing the tensor as little-endian bytes makes the binary on disk match the
+        # manifest metadata, and the checksum is recorded separately for validation.
         tensor.astype(np.dtype(config.dtype).newbyteorder("<"), copy=False).tofile(destination)
         entries.append({
             "identity": selected_image.identity, "split": selected_image.split,

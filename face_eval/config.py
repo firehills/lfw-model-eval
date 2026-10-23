@@ -1,4 +1,10 @@
-"""Explicit, model-specific preprocessing contracts."""
+"""Explicit, model-specific preprocessing contracts.
+
+This module defines the single configuration object that every preprocessing and
+runtime step relies on. The fields describe the model image size, channel order,
+normalization parameters, dtype, and the landmark alignment logic that converts a
+crop into the canonical face geometry expected by the recognition model.
+"""
 
 from dataclasses import asdict, dataclass
 import json
@@ -9,6 +15,40 @@ import numpy as np
 
 @dataclass(frozen=True)
 class ModelConfig:
+    """Canonical preprocessing contract for a single recognition model.
+
+    Parameters
+    ----------
+    name:
+        Human-readable model identifier used for diagnostics and reporting.
+    size:
+        Square input size in pixels. The model expects a resized face crop of this size.
+    layout:
+        Tensor layout, either NCHW or NHWC, which determines how channels are ordered
+        when converting an image into a model-ready tensor.
+    color:
+        Color channel order used by the source image before normalization; RGB and BGR are
+        the supported values.
+    mean/std:
+        Per-channel normalization values applied after converting to floating point.
+        They are the main bridge from raw pixels to the model's expected input scale.
+    dtype:
+        Storage type of the final tensor. Float32 uses direct normalization; integer dtypes
+        require quantization metadata.
+    quantization_scale/quantization_zero_point:
+        Quantization parameters used only for uint8/int8 models. They must agree with the
+        preprocessing and downstream runtime contract.
+    alignment:
+        Face alignment strategy. "arcface" uses the standard five-point template; "custom"
+        accepts a provided landmark set.
+    landmarks:
+        Optional custom landmark locations used when alignment="custom".
+    detection_threshold:
+        Confidence threshold that filters face detections before alignment and preprocessing.
+    face_selection:
+        Strategy used when multiple faces are detected in the same image.
+    """
+
     name: str
     size: int = 112
     layout: str = "NCHW"
@@ -24,6 +64,7 @@ class ModelConfig:
     face_selection: str = "largest"
 
     def __post_init__(self):
+        """Validate every configuration field before the model is processed."""
         if not isinstance(self.name, str) or not self.name or type(self.size) is not int or self.size < 1:
             raise ValueError("A name and positive integer input size are required")
         if self.layout not in {"NCHW", "NHWC"} or self.color not in {"RGB", "BGR"}:
@@ -61,9 +102,15 @@ class ModelConfig:
 
     @property
     def shape(self) -> tuple[int, ...]:
+        """Return the expected tensor shape sent to the model.
+
+        The shape is the preprocessor's data contract: a batch of one image with three
+        channels and a square spatial size, either in NCHW or NHWC ordering.
+        """
         return (1, 3, self.size, self.size) if self.layout == "NCHW" else (1, self.size, self.size, 3)
 
     def target_landmarks(self) -> np.ndarray:
+        """Return the canonical 5-point alignment target for the configured face crop."""
         if self.alignment == "custom":
             return np.asarray(self.landmarks, dtype=np.float64)
         return np.array([
@@ -72,9 +119,15 @@ class ModelConfig:
         ]) * (self.size / 112.0)
 
     def to_dict(self) -> dict:
+        """Serialize the configuration to the JSON form used in manifests and reports."""
         return asdict(self)
 
     @classmethod
     def load(cls, path: str | Path) -> "ModelConfig":
+        """Load a JSON config from disk.
+
+        This provides a standard way to rehydrate a model contract that was written out in
+        a previous run or stored alongside a prepared dataset.
+        """
         with Path(path).open() as stream:
             return cls(**json.load(stream))

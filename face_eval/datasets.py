@@ -1,4 +1,9 @@
-"""Dataset acquisition and deterministic identity-folder selection."""
+"""Dataset acquisition and deterministic identity-folder selection.
+
+The data flow in this module is: download or extract a dataset archive -> validate it ->
+select the first N enrolment images and next M test images per identity -> return a
+stable, reproducible ordered list that downstream preprocessing can consume.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,7 +32,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".bmp"}
 
 
 def extract_archive(archive: Path, destination: Path, max_bytes: int = 4 * 1024**3) -> None:
-    """Reject links, special files, traversal and oversized archives before extraction."""
+    """Validate and extract an archive without allowing traversal or symlink escapes."""
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
     if zipfile.is_zipfile(archive):
@@ -60,7 +65,6 @@ def extract_archive(archive: Path, destination: Path, max_bytes: int = 4 * 1024*
             total = 0
             seen = set()
             for member in members:
-                # A harmless "." root directory is common in tar archives.
                 if member.name.rstrip("/") in {".", ""} and member.isdir():
                     continue
                 target = contained_path(destination, member.name)
@@ -91,6 +95,21 @@ def download_dataset(
     destination: Path, dataset: str = "lfw", url: str | None = None,
     checksum: str | None = None, max_bytes: int = 4 * 1024**3,
 ) -> Path:
+    """Download a dataset archive to a fresh destination and verify its checksum.
+
+    Parameters
+    ----------
+    destination:
+        Final directory where the extracted dataset should be placed.
+    dataset:
+        Dataset key name; supported values are defined in DATASETS.
+    url:
+        Optional override for the remote dataset URL.
+    checksum:
+        Optional SHA-256 expected for the remote dataset archive.
+    max_bytes:
+        Maximum payload size accepted for the archive to prevent oversized downloads.
+    """
     if destination.exists():
         raise FileExistsError(f"Destination already exists: {destination}")
     if url is None:
@@ -129,6 +148,8 @@ def download_dataset(
 
 @dataclass(frozen=True)
 class SelectedImage:
+    """Concrete image choice used by dataset preparation, including identity and split."""
+
     identity: str
     path: Path
     split: str
@@ -138,9 +159,11 @@ def select_images(
     root: Path, enrolment: int, testing: int, identities: list[str] | None = None,
     max_identities: int | None = None,
 ) -> tuple[list[SelectedImage], list[dict]]:
-    """Take the first `enrolment` then the next `testing` images (sorted by filename) per identity.
+    """Select a deterministic first-N-per-identity split for evaluation.
 
-    `max_identities` keeps only the first N eligible identities in alphabetical order.
+    The function walks identities alphabetically, keeps only those with enough files, and
+    returns the first `enrolment` files for enrolment and the next `testing` files for test.
+    This ordering is stable and reproducible across runs.
     """
     if enrolment < 1 or testing < 1:
         raise ValueError("enrolment and testing image counts must be positive")

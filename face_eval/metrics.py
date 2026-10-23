@@ -1,4 +1,9 @@
-"""Verification scores, confusion counts and descriptive ROC metrics."""
+"""Verification scores, confusion counts and descriptive ROC metrics.
+
+This module translates raw embedding comparisons into the scalar values that drives the
+final report. The data flow is: embedding vectors -> score against templates -> compare
+score to a threshold -> summarize confusion counts and ROC statistics.
+"""
 
 import numpy as np
 
@@ -7,6 +12,14 @@ METRICS = ("cosine", "dot", "euclidean", "manhattan")
 
 
 def unit(vector: np.ndarray) -> np.ndarray:
+    """L2-normalize a vector in-place in the sense of a returned copy.
+
+    Parameters
+    ----------
+    vector:
+        Embedding vector produced by the runtime. The vector must be finite and nonzero
+        otherwise the normalization contract is invalid.
+    """
     norm = np.linalg.norm(vector)
     if not np.isfinite(norm) or norm <= 1e-12:
         raise ValueError("Cannot normalize a zero or nonfinite vector")
@@ -14,6 +27,18 @@ def unit(vector: np.ndarray) -> np.ndarray:
 
 
 def score(probe: np.ndarray, templates: np.ndarray, metric: str) -> np.ndarray:
+    """Compare one probe embedding against all template embeddings.
+
+    Parameters
+    ----------
+    probe:
+        The embedding for a single test image.
+    templates:
+        Matrix where each row is an identity template built from enrolment images.
+    metric:
+        Name of the similarity/distance function. Higher values are better for cosine and
+        dot; lower values are better for Euclidean and Manhattan.
+    """
     if metric == "cosine":
         return np.clip(np.stack([unit(t) for t in templates]) @ unit(probe), -1, 1)
     if metric == "dot":
@@ -26,12 +51,27 @@ def score(probe: np.ndarray, templates: np.ndarray, metric: str) -> np.ndarray:
 
 
 def higher_is_better(metric: str) -> bool:
+    """Return whether the metric semantics treat larger scores as stronger matches."""
     if metric not in METRICS:
         raise ValueError(f"Unknown metric: {metric}")
     return metric in {"cosine", "dot"}
 
 
 def verification_metrics(labels: np.ndarray, scores: np.ndarray, threshold: float, metric: str) -> dict:
+    """Compute confusion-matrix and ROC-style metrics for a verification run.
+
+    Parameters
+    ----------
+    labels:
+        Boolean array where True indicates a genuine comparison and False an impostor one.
+    scores:
+        Scalar scores paired with each label. Their ordering, not just their count, matters
+        for ROC/AUC and equal-error-rate calculations.
+    threshold:
+        Decision boundary for acceptance.
+    metric:
+        Name of the underlying metric, defining whether high or low scores are better.
+    """
     labels = np.asarray(labels, dtype=bool)
     scores = np.asarray(scores, dtype=np.float64)
     if labels.ndim != 1 or labels.shape != scores.shape or not len(labels):
@@ -50,7 +90,9 @@ def verification_metrics(labels: np.ndarray, scores: np.ndarray, threshold: floa
     precision = ta / (ta + fa) if ta + fa else 0.0
     recall = ta / positive
 
-    # Process tied scores together; accepting only part of a tie would inflate AUC.
+    # ROC curves are drawn by sorting scores from strongest to weakest, then collapsing
+    # tied values together. This keeps the AUC and EER calculations consistent with the
+    # real score distribution instead of treating each comparison as independent.
     oriented = scores if higher else -scores
     order = np.argsort(-oriented, kind="stable")
     ordered_labels, ordered_scores = labels[order], oriented[order]
