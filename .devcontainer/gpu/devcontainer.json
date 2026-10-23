@@ -4,7 +4,10 @@
     "dockerfile": "Dockerfile",
     "context": "../.."
   },
-  "runArgs": ["--gpus", "all"],
+  "runArgs": [
+    "--name", "lfw-model-eval", 
+    "--gpus", "all"
+  ],
   "remoteUser": "ubuntu",
   "containerEnv": {
     "TF_USE_LEGACY_KERAS": "1"

@@ -4,6 +4,9 @@
     "dockerfile": "Dockerfile",
     "context": ".."
   },
+  "runArgs": [
+    "--name", "lfw-model-eval"
+  ],
   "remoteUser": "vscode",
   "containerEnv": {
     "CUDA_VISIBLE_DEVICES": "-1",
