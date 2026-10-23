@@ -92,6 +92,18 @@ again. For repeatable/offline runs preserve that cache using a Docker volume,
 record the detector weight checksum, and supply it before running preprocessing.
 The detector library manages that download; recognition weights are never
 automatically downloaded.
+To fetch ONNX files safely from trusted hosts, use:
+
+```bash
+python download_model.py \
+  --url https://your-host.example/model.onnx \
+  --sha256 YOUR_64_CHARACTER_SHA256 \
+  --output models/model.onnx
+```
+
+The helper only allows HTTPS, enforces a `.onnx` destination, refuses to
+overwrite existing files, supports a download size cap (`--max-bytes`), and
+writes `models/model.onnx.download.json` with the source URL and observed hash.
 
 ## 2. Download a dataset
 
@@ -307,6 +319,8 @@ new directory before retrying. Do not evaluate or edit a partial run.
 ## 5. Evaluate a recognition model
 
 Place your licensed model under the git-ignored `models/` directory.
+If needed, download it with [`download_model.py`](download_model.py) as shown
+above and verify the model licence before use.
 
 ```bash
 python evaluate.py \
@@ -592,7 +606,7 @@ Inside the devcontainer:
 ```bash
 python -m pytest tests -q
 python -m ruff check .
-python -m compileall -q face_eval download_dataset.py prepare_tensors.py evaluate.py
+python -m compileall -q face_eval download_dataset.py download_model.py prepare_tensors.py evaluate.py
 python -m pip check
 ```
 
@@ -630,6 +644,7 @@ face_eval/runtimes.py    ONNX/TFLite CPU/GPU adapters
 face_eval/metrics.py     Scores, confusion counts, ROC/AUC/EER
 face_eval/evaluation.py  Manifest validation, templates and report persistence
 download_dataset.py     Download CLI
+download_model.py       ONNX download helper CLI
 prepare_tensors.py      Tensor preparation CLI
 evaluate.py             Recognition evaluation CLI
 tests/                  Offline unit and runtime integration tests
